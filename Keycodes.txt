@@ -1,0 +1,62 @@
+
+KEYUP - @
+
+E - OPERATE
+B - MENU
+C - SET
+A - ENTER
+
+F - RIGHT
+0 - LEFT
+K - UP
+J - DOWN
+
+P - DISPLAY
+
+Device printing H<?>
+
+Tried sending 'E' only:
+
+Device still printing H<?>
+
+Tried sending 'E' then '@' (keyup) 200ms later:
+
+Now it appears to be printing new line instead of H<?> forever
+
+Tried sending 'E' then '@' (keyup), then 'E', then '@': 
+
+Same behavior, new line forever
+
+Tried sending 'H' then '@'
+
+Same behavior, new line forever
+
+Tried sending 'P' then '@'
+
+H<?> forever
+
+
+Okay, there is some evidence the Plug for the RJ45 remote display option has to be inserted AFTER the PSU boots!
+I wonder if that "Fixed" RS232 output triggers detection
+
+Tried disabling an if/else statement that ensured something was transmitted to PSU every 100 ms. 
+
+It appears that the 2304A just Transmits its entire screen contents as fast as possible at the remote display.
+
+But, the display must boot up, and then the Remote display option must be plugged in after boot for it to start transmitting. 
+
+Tried unplugging and replugging the display RJ45. Weirdly, the 2304A actually started transmitting again!
+
+So, it appears to only fail if the 2304A is booted with the Remote Display connected!
+
+
+
+Except the 2304A seems to always boot now. 
+
+Tried turning the 2304A off and turning it back on. The serial recovered after a ~10s boot time.
+
+Tried turning off the 24V UI power supply and turning it back on. The serial still recovered after a 10s period.
+
+Under both cases, the RJ45 cord connecting the two was left plugged in.
+
+Not sure why it didn't work originally. 
