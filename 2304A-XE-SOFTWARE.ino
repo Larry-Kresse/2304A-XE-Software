@@ -1,25 +1,39 @@
 #include <FastLED.h>
-
+#include "esp_timer.h" // for esp_timer_get_time()
 #include <SoftwareSerial.h>
 
 /*
-/Program for writing to NHD-0420DZW series display. 
-/This code is written for the Arduino Uno (Microchip ATmega328P) using Serial Interface. 
-/
-/Newhaven Display invests time and resources providing this open source code,
-/Please support Newhaven Display by purchasing products from Newhaven Display! 
+Keithley 2304A remote display alternative PSU control software
 
-* Copyright (c) 2020 Alee Shah - Newhaven Display International, Inc. 
-*
-* This code is provided as an example only and without any warranty by Newhaven Display. 
-* Newhaven Display accepts no responsibility for any issues resulting from its use.
-* The developer on the final application incorporating any parts of this 
-*  sample code is responsible for ensuring its safe and correct operation
-*   and for any consequences resulting from its use. 
-* See the GNU General Public License for more details.
-* 
-* 
+Larry Kresse
+Started in 2023, then abandoned
+
+Salvaged in 2026
+
+MIT Licensed
 */
+
+/****************************************************
+*      Application state                            *
+****************************************************/
+bool psu_enabled = false; //is PSU relay commanded on?
+bool psu_comms = false;   //is PSU talking to us?
+//if PSU enabled==false, the "power" light will be Red
+//if PSU enabled==true, but psu_comms is false, 
+// the "power" light will be Yellow
+
+//if PSU enabled==true, and psu_comms is true, the
+// power light will be green.
+
+//if psu_enabled == false or psu_comms == false,
+// the OLED should also be off to maintain lifespan
+// (OLEDs can have a lifespan as low as 10000 hrs)
+
+//relay to connect 4-wire (kelvin) sensing wires
+//to jacks on front of UI board
+//I actually forgot 
+bool fourwire_sw_enabled = false; 
+
 
 /****************************************************
 *      PINOUT: Input keys                           *
@@ -44,12 +58,18 @@
           
 #define KEY_MENU 12
 
+//not a key, but probably was intended to be controlled
+//by one on external module
 #define LOCK 13        //An external input intended to
                        //disable keys in case of cats
                        //walking on keypad. Not used.
 
-
-
+/****************************************************
+*      PINOUT: Output relays                        *
+****************************************************/
+#define RELAY_4WS 21 //4 wire sensing signal relay
+#define RELAY_FAN 4  //optional PC fan to cool 2304A 
+#define RELAY_POWER 15 //controls power to 2304A
 
 /****************************************************
 *      PINOUT: Character OLED                       *
@@ -414,6 +434,131 @@ void updateLEDs() {
 }
 
 /*****************************************************
+*     Poll-keys function                             *
+*****************************************************/
+// handle debouncing and trigger actions in response
+// to key-up, key-down, key-toggle
+
+// KEY_OPERATE 39 
+// KEY_4WSENSE 36 //Not a 2304A key. Controls 4 wire
+                       //sense signal relay
+
+// KEY_ENTER 34
+// KEY_RIGHT 35
+// KEY_DOWN 32
+// KEY_UP 33
+// KEY_LEFT 25
+// KEY_SET 26
+// KEY_DISPLAY 27
+// KEY_POWER 14   //Not a 2304A key. Controls power
+                       //to the 2304A via a relay.
+          
+// KEY_MENU 12
+
+// for this much time after Key-up, the key will be 
+// unpressable
+#define KEY_DEBOUNCE_TIME_US 10000
+
+// to get a result, the key must be held for this much time
+#define KEY_HOLD_TIME_TO_TRIGGER_US 40000
+
+//keys to be polled
+int keys[11] = {KEY_OPERATE, KEY_4WSENSE, KEY_ENTER, KEY_RIGHT, KEY_DOWN, KEY_UP, KEY_LEFT, KEY_SET, KEY_DISPLAY, KEY_POWER, KEY_MENU};
+
+//The 2304A serial command (a single byte) that should be sent when they key is pressed
+//? and / are not 2304A commands, and signify something different should be done instead of communicating with the 2304A
+char codes[11] = {'E',        '?',          'A',        'F',      'J',      'K',    '0',      'C',       'P',       '/',        'B'};
+
+//KEY-UP is the @ for some reason
+char keyup = '@';
+
+//how long has key been held? (in us)
+int64_t held[11] = {0};
+
+//this should be updated by initKeyPolling() on startup ideally..
+int64_t last_update_time_us[11] = {0};
+
+//have we sent the code to the 2304A yet (or toggled the global var for power or 4wsense)?
+bool triggeredAction[11] = {0};
+
+//all this does is call the esp32's timer to set the initial update time
+void initKeyPolling() {
+  int64_t timeInit = esp_timer_get_time();
+  for (size_t i = 0; i<sizeof(keys)/sizeof(keys[0]); i++) {
+    last_update_time_us[i] = timeInit;
+  }
+}
+
+// for 2304A keys, this handles debounce and sends serial commands to the 2304A
+// for non-2304A keys, this changes the state of the system and doesn't send serial.
+
+// expectation is that relay outputs and LEDs are to be updated by another function
+void pollKeysAndTriggerActions()
+{
+
+  //check if each key is being pressed
+  for (size_t i = 0; i<sizeof(keys)/sizeof(keys[0]); i++) {
+
+    //There is a clock time for each key since execution time of 
+    //one key's entry can increase if it has to send any serial
+    //data
+
+    //esp_timer_get_time() stores a 64-bit int, and will roll over in 
+    //292471 years. I'll be dead by then, so I'm not going to account
+    //for that edge case
+    int64_t now = esp_timer_get_time(); //get current time
+
+    //calculate THIS KEY's elapsed time
+    int64_t elapsed_time = now - last_update_time_us[i]; 
+    last_update_time_us[i] = now; //store THIS KEY's last update time
+
+    //update held time for negative held
+    //if held is negative, it means we are in the post-release debounce
+    //This can increase until it hits 0. Held doesn't increase past 0 unless
+    //button is actually held down
+    if (held[i]<0) { //if we are in the debounce state, we can't even check if buttons is held down
+      held[i] += elapsed_time;
+      if(held[i]>0) {held[i]=0;} //held cannot exceed 0 unless button is actually held
+
+    } else { //we are not in the debounce state!
+      if (digitalRead(keys[i])==0) { //key is pressed
+        held[i] += elapsed_time; //update held if the key is actively being pressed
+
+        if ((held[i]>KEY_HOLD_TIME_TO_TRIGGER_US) && (triggeredAction[i]==0)) { //key has been held long enough to trigger action
+          if (codes[i] == '?' ) { //4WS pin
+            fourwire_sw_enabled = !fourwire_sw_enabled; 
+          } else if (codes[i] == '/' ) {//Power pin
+            psu_enabled = !psu_enabled;
+          } else {
+            mySerial.write(codes[i]); //send the button's code to the 2304A
+          }
+          triggeredAction[i] = 1;     //record that we sent code, so we don't send multiple
+
+        }
+      } else { //key is not pressed
+        if (held[i]>KEY_HOLD_TIME_TO_TRIGGER_US) { //key has been held long enough to trigger action
+          if ((codes[i] != '?' ) && (codes[i] != '/')) { //the special codes don't have a keyup action
+            mySerial.write(keyup); //key was pressed long enough to send code, so it must also send keyup char
+          } 
+          held[i] = (-1)*KEY_DEBOUNCE_TIME_US; //while held is negative, button can't be pressed
+                                               //implements KEY_DEBOUNCE_TIME_US debounce
+          triggeredAction[i] = 0; //reset action triggered tracker                                          
+        }
+      }
+    }
+  } //key polling loop
+
+
+
+} // pollKeysAndTriggerActions()
+
+
+void updateRelayStates() {
+  //if(fourwire_sw_enabled)
+  //psu_enabled
+}
+
+/*****************************************************
 *           Setup Function, to run once              *
 *****************************************************/
 
@@ -423,6 +568,11 @@ void setup() {
   pinMode(SCL,OUTPUT);
   pinMode(SDI,OUTPUT);
   pinMode(CS,OUTPUT);
+
+  //output relays
+  pinMode(RELAY_4WS,OUTPUT); //4 wire sensing signal relay
+  pinMode(RELAY_FAN,OUTPUT); //optional PC fan to cool 2304A 
+  pinMode(RELAY_POWER,OUTPUT);//controls power to 2304A
 
   //WS2812B LEDs
   pinMode(LEDPIN,OUTPUT);
@@ -455,9 +605,9 @@ void setup() {
   //OLED initialization
   //DDRB = 0xFF; // Enable pins on PORT B as outputs
   init1();
-  
-  //delay(100);
 
+  //delay(100);
+  initKeyPolling(); //updates the key timers
   
 }
 
