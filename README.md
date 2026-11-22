@@ -1,6 +1,6 @@
 I have a Keithley 2304A benchtop power supply. Keithley PSUs are known for being high-quality, but they are expensive. 
 
-I bought a few 2304As for fairly cheap in 2023. Only issue, the UI was terrible. Squishy membrane keys, 1990s LCD that could only be viewed from head-on, and no barrel jack connectors.
+I bought a few 2304As for fairly cheap in 2023. Only issue (and the reason they were cheap), the UI was terrible. Squishy membrane keys, 1990s LCD that could only be viewed from head-on, and no barrel jack connectors.
 
 It was designed for automated testing via IEEE-488, so the UI didn't get any design effort. The 2304A had a remote display option,
 connected over RS-232. But that remote display has the same awful UI as the 2304A. 
