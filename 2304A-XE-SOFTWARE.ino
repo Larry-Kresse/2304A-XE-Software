@@ -240,19 +240,7 @@ void ret_home(){             // Return to home position
 //  }
 //  end_data_transmission();
 ///************************************* 
-//  command(0x94);              // Third Line
-//  start_data_transmission();
-//  for( int i=0;i<20;i++){
-//    data(text3[i]);
-//  }
-//  end_data_transmission();  
-///************************************  
-//  command(0xD4);              // Fourth Line
-//  start_data_transmission();
-//  for (int i=0;i<20;i++){
-//    data(text4[i]);  
-//  }*****
-//  end_data_transmission();******/   
+
 //}
 //
 //
@@ -271,20 +259,7 @@ void ret_home(){             // Return to home position
 //    data(text6[i]);
 //  }
 //  end_data_transmission();
-///*****************************************    
-//  command(0x94);              // Third Line
-//  start_data_transmission();
-//  for( int i=0;i<20;i++){
-//    data(text7[i]);
-//  }
-//  end_data_transmission();   
-///****************************************    
-//  command(0xD4);              // Fourth Line
-//  start_data_transmission();
-//  for (int i=0;i<20;i++){
-//    data(text8[i]);  
-//  }
-//  end_data_transmission();  **/  
+
 //}
 
 /****************************************************
@@ -322,27 +297,14 @@ void printToScreen(){                 // DISPLAY TEXT
     last2[i]=line2[i];//store last data
   }
   end_data_transmission();
-/*****************************************    
-  command(0x94);              // Third Line
-  start_data_transmission();
-  for( int i=0;i<20;i++){
-    data(text7[i]);
-  }
-  end_data_transmission();   
-/****************************************    
-  command(0xD4);              // Fourth Line
-  start_data_transmission();
-  for (int i=0;i<20;i++){
-    data(text8[i]);  
-  }
-  end_data_transmission();  **/  
+
 }
 
 /****************************************************
 *        OLED  Initialization Routine               *
 ****************************************************/
 
-void init1(){
+void initOLED(){
   delay(300);
 
   command(0x28);             //Function set
@@ -565,16 +527,114 @@ void updateRelayStates() {
 // LED-backlit output button. When the PSU's output
 // was on, the output button was blue. 
 
+//default color of backlighting. 
+CRGB default_color = 0x00AAAA;
+
+//if action is triggered, use this color
+CRGB hit_color = 0x00FFFF;
+
+//if button is in debounce 
+CRGB debounce_color = 0x000000;
+
+size_t num_leds = 11;
+                // 0               1         2          3           4        5        6        7          8           9          10
+//int keys[11] = {KEY_OPERATE, KEY_4WSENSE, KEY_ENTER, KEY_RIGHT, KEY_DOWN, KEY_UP, KEY_LEFT, KEY_SET, KEY_DISPLAY, KEY_POWER, KEY_MENU};
+
+//access the LED's index value of this array to find the relevant key index
+//So you can lookup if a key is in debounce by the key's LED
+size_t led_index_2_key_index[] = {9,10,1,7,8,6,5,4,3,0,2};
+
+// Takes the LED's index, and uses the state of the corresponding key
+// to color LED, with different colors for debounced, triggered, and
+// default backlight state
+void setLedByIndexAndKeyState(size_t led_index) {
+  //this index is used for held, triggeredAction, 
+  size_t key_index = led_index_2_key_index[led_index];
+
+  if(held[key_index]<0) {
+    leds[led_index] = debounce_color; //key is in debounce
+  } else {
+    if (triggeredAction[key_index]) {
+      leds[led_index] = hit_color; 
+    } else {
+      leds[led_index] = default_color;
+    }
+  }
+
+}
+
+// This is to be used if the PSU is not interactable
+// It is not interactable if it is powered off or if
+// it has not connected yet
+// This allows LEDs to communicate to user that the PSU
+// isn't usable yet.
+void clearAllLEDsExceptPower() {
+    for (size_t i = 1; i<num_leds; i++)
+    {
+      leds[i]=CRGB::Black;  
+    }
+}
+
+// Sets the color of the key backlight LEDs based on the
+// system state
 void updateLEDs() {
-  leds[1]=CRGB::Red;
-  //output blue
+  //Power LED 0
+  if(psu_enabled) {
+    if(psu_comms) { //green if communicating
+      leds[0]=CRGB::Green;
+    } else { //yellow if on but not communicating yet
+      leds[0]=CRGB::Yellow;
+      clearAllLEDsExceptPower(); //we can't control 2304A until it connects
+                                 //this communicates that to user
+      FastLED.show();
+      return;                                  
+    }
+  } else { //red if powered down via power relay, all LEDs but power should be off!
+    leds[0]=CRGB::Red;
+    clearAllLEDsExceptPower(); //we can't control 2304A until it is powered on!
+
+    FastLED.show();
+    return;
+  }
+
+  //Menu LED 1
+  setLedByIndexAndKeyState(1);
+
+  //4WS LED 2
+  if(fourwire_sw_enabled) {
+    leds[2] = CRGB::Green;
+  } else {leds[2] = default_color; }
+
+  //Set LED 3
+  setLedByIndexAndKeyState(3);
+
+  //Display LED 4
+  setLedByIndexAndKeyState(4);
+
+  //Left LED 5
+  setLedByIndexAndKeyState(5);
+
+  //Up LED 6
+  setLedByIndexAndKeyState(6);
+
+  //Down LED 7
+  setLedByIndexAndKeyState(7);
+
+  //Right LED 8
+  setLedByIndexAndKeyState(8);
+
+  //Output LED
   if((line1[13]=='O')&&(line1[14]=='F')&&(line1[15]=='F')) {
     leds[9]=CRGB::Black;
-    FastLED.show();
+
   } else if ((line1[14]=='O')&&(line1[15]=='N')) {
-    leds[9]=CRGB::Blue;
-    FastLED.show();
+    leds[9]=CRGB::Blue; //Keithley Output Blue
   }
+
+  //Enter LED 10
+  setLedByIndexAndKeyState(10);
+
+  //actually outputs data to LEDs
   FastLED.show();
 }
 
@@ -614,20 +674,19 @@ void setup() {
   //Debug serial
   Serial.begin(9600);
 
-  //RS-232 to Keithley 2304A
+  //RS-232 Serial to Keithley 2304A
   mySerial.begin(9600,EspSoftwareSerial::SWSERIAL_8N1,RS232_RX,RS232_TX,false);
   Serial.println("START");  // reserve 200 bytes for the inputString:
-  inputString.reserve(200);
+  inputString.reserve(400);
 
-
+  //Add LEDs
   FastLED.addLeds<NEOPIXEL, LEDPIN>(leds, 11);
   
   //OLED initialization
-  //DDRB = 0xFF; // Enable pins on PORT B as outputs
-  init1();
+  initOLED();
 
   //delay(100);
-  initKeyPolling(); //updates the key timers
+  initKeyPolling(); //updates the key timers for the first time
   
 }
 
