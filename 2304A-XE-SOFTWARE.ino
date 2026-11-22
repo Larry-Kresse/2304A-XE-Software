@@ -71,6 +71,8 @@ bool fourwire_sw_enabled = false;
 #define RELAY_FAN 4  //optional PC fan to cool 2304A 
 #define RELAY_POWER 15 //controls power to 2304A
 
+#define FAN_POWER 128 //PC fan runs at half speed
+                      //When PSU is on
 /****************************************************
 *      PINOUT: Character OLED                       *
 ****************************************************/
@@ -410,28 +412,6 @@ void updateScreen() {
   }
 }
 
-/*****************************************************
-*     WS2812B  LED update function                   *
-*****************************************************/
-// I enjoyed a function of a new Keithley PSU at the
-// HIVE Makerspace at Georgia Tech. It had a 
-// LED-backlit output button. When the PSU's output
-// was on, the output button was blue. 
-
-void updateLEDs() {
-  leds[1]=CRGB::Red;
-  //output blue
-  if((line1[13]=='O')&&(line1[14]=='F')&&(line1[15]=='F')) {
-    leds[9]=CRGB::Black;
-    FastLED.show();
-  } else if ((line1[14]=='O')&&(line1[15]=='N')) {
-    leds[9]=CRGB::Blue;
-    FastLED.show();
-  }
-  FastLED.show();
-
-  
-}
 
 /*****************************************************
 *     Poll-keys function                             *
@@ -552,10 +532,50 @@ void pollKeysAndTriggerActions()
 
 } // pollKeysAndTriggerActions()
 
+/*****************************************************
+*           "Relay" updater function                 *
+*****************************************************/
+// 4-wire-sensing switch is a signal relay to connect the
+// 4-wire kelvin sensing leads to the 2304A. 
+
+// psu_enabled controls the main power relay, that can
+// cut power to the 2304A to save energy. 
+
+// Fan is a solid-state switch and can be PWMd to adjust
+// PC case fan speed. The PC case fan is intended to be
+// Aimed at the 2304A to provide extra cooling.
+// The case fan is only on if the PSU is powered on too.
 
 void updateRelayStates() {
-  //if(fourwire_sw_enabled)
-  //psu_enabled
+  digitalWrite(RELAY_4WS,fourwire_sw_enabled);
+  digitalWrite(RELAY_POWER,psu_enabled);
+  if (psu_enabled) {
+    analogWrite(RELAY_FAN, FAN_POWER);
+  } else {
+    digitalWrite(RELAY_FAN, 0); //no PWM, fan off
+  }
+}
+
+
+/*****************************************************
+*     WS2812B RGB LED update function                *
+*****************************************************/
+// I enjoyed a function of a new Keithley PSU at the
+// HIVE Makerspace at Georgia Tech. It had a 
+// LED-backlit output button. When the PSU's output
+// was on, the output button was blue. 
+
+void updateLEDs() {
+  leds[1]=CRGB::Red;
+  //output blue
+  if((line1[13]=='O')&&(line1[14]=='F')&&(line1[15]=='F')) {
+    leds[9]=CRGB::Black;
+    FastLED.show();
+  } else if ((line1[14]=='O')&&(line1[15]=='N')) {
+    leds[9]=CRGB::Blue;
+    FastLED.show();
+  }
+  FastLED.show();
 }
 
 /*****************************************************
@@ -615,26 +635,15 @@ void setup() {
 *           Loop Function, to run repeatedly         *
 *****************************************************/
 
-bool operateState=0;
-
 void loop() {
 
-  /*if(digitalRead(39)==1) {
-    if(operateState==0) {
-      mySerial.write('E');
-      operateState=1;
-    }
-  } else {
-    if(operateState==1) {
-      mySerial.write('@');
-      operateState=0;
-    }
-  }*/
+
+  pollKeysAndTriggerActions();
+  updateRelayStates();
+  updateLEDs();
   
-  //disp1();
-  //delay(2500);
-  //disp2();
+
   delay(100);
   updateScreen();
-  updateLEDs();
+
 }
