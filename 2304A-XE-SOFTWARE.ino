@@ -324,9 +324,23 @@ void initOLED(){
 
 
 byte startFrame[4]={5,0,6,5};
+int64_t last_successful_rx = 0;
 
+int64_t RX_TIMEOUT_US = 500000;
 
 void updateScreen() {
+
+  // if we have received an update from the PSU recently, check if we have had any lately
+  // to detect a timeout (and set psu_comms false to warn user)
+  if (psu_comms == true)
+  {
+    int64_t now = esp_timer_get_time(); //get current time
+    if (now - last_successful_rx > RX_TIMEOUT_US) {
+      psu_comms = false;
+    }
+  }
+
+
   if(mySerial.available()>0) {
     int byteCounter=0;
     int lineCounter=0;
@@ -365,6 +379,11 @@ void updateScreen() {
     }
     if(validFrame==true)
     {
+      //yay, we got data! celebrate by setting psu_comms to true!
+      psu_comms = true;
+      last_successful_rx = esp_timer_get_time(); //store current time as last successful RX
+                                                 //used to detect timeout
+
       Serial.println(inputData);
       inputData="";
     
