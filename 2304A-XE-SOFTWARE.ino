@@ -458,7 +458,7 @@ void pollKeysAndTriggerActions()
 {
 
   //check if each key is being pressed
-  for (size_t i = 0; i<sizeof(keys)/sizeof(keys[0]); i++) {
+  for (size_t i = 4; i<sizeof(keys)/sizeof(keys[0]); i++) {
 
     //There is a clock time for each key since execution time of 
     //one key's entry can increase if it has to send any serial
@@ -483,9 +483,18 @@ void pollKeysAndTriggerActions()
 
     } else { //we are not in the debounce state!
       if (digitalRead(keys[i])==0) { //key is pressed
+        if(i>3) {
+          Serial.print("Key ");         Serial.print(i);
+          Serial.println(" is pressed! ");
+        }
+
         held[i] += elapsed_time; //update held if the key is actively being pressed
 
         if ((held[i]>KEY_HOLD_TIME_TO_TRIGGER_US) && (triggeredAction[i]==0)) { //key has been held long enough to trigger action
+          if(i>3) {
+            Serial.print("Key ");         Serial.print(i);
+            Serial.println(" is triggered! ");  
+          }
           if (codes[i] == '?' ) { //4WS pin
             fourwire_sw_enabled = !fourwire_sw_enabled; 
           } else if (codes[i] == '/' ) {//Power pin
@@ -704,9 +713,12 @@ void setup() {
   //OLED initialization
   initOLED();
 
-  //delay(100);
   initKeyPolling(); //updates the key timers for the first time
-  
+
+  delay(100);
+
+  pinMode(KEY_POWER, INPUT_PULLUP); //Not a 2304A key.
+
 }
 
 /*****************************************************
@@ -714,14 +726,17 @@ void setup() {
 *****************************************************/
 
 void loop() {
+  //delay(100);
+  //mySerial.write('H');
 
 
   pollKeysAndTriggerActions();
   updateRelayStates();
   updateLEDs();
   
-
-  delay(100);
+  mySerial.write('@');
+  delay(50);
   updateScreen();
+
 
 }
