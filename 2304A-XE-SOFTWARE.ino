@@ -22,27 +22,69 @@
 */
 
 /****************************************************
-*      PINOUT: Arduino Uno -> Character OLED        *
+*      PINOUT: Input keys                           *
 ****************************************************/
+
+//NOTE: These inputs need external pull-up resistors
+//Unfortunately, Espressif messed up the ESP32's design
+//And they don't have software-controllable internal ones
+#define KEY_OPERATE 39 
+#define KEY_4WSENSE 36 //Not a 2304A key. Controls 4 wire
+                       //sense signal relay
+
+#define KEY_ENTER 34
+#define KEY_RIGHT 35
+#define KEY_DOWN 32
+#define KEY_UP 33
+#define KEY_LEFT 25
+#define KEY_SET 26
+#define KEY_DISPLAY 27
+#define KEY_POWER 14   //Not a 2304A key. Controls power
+                       //to the 2304A via a relay.
+          
+#define KEY_MENU 12
+
+#define LOCK 13        //An external input intended to
+                       //disable keys in case of cats
+                       //walking on keypad. Not used.
+
+
+
+
+/****************************************************
+*      PINOUT: Character OLED                       *
+****************************************************/
+//MPN: Newhaven Display NHD-0216KZW-AB5 16x2 OLED
+//Connected over SPI
 
 #define CS    5
 #define SDI   23
 #define SCL   18
 
-//Serial input stuff
+/****************************************************
+*              Serial connection to 2304A           *
+****************************************************/
 
+// Physical layer is RS-232
+#define RS232_RX 16
+#define RS232_TX 17
+
+// buffers, serial objects, and serial stream control
 String inputString = "";         // a String to hold incoming data
 bool stringComplete = false;  // whether the string is complete
-EspSoftwareSerial::UART  mySerial (16,17,true);
+EspSoftwareSerial::UART  mySerial (RS232_RX,RS232_TX,true);
 String inputData;
 
-//LEDs
+/****************************************************
+*          WS2812B-compatible gamer LEDs!           *
+****************************************************/
+//uses FASTLED
 CRGB leds[11];
 
 #define LEDPIN 22
 
 /****************************************************
-*                 Text Strings  for display                    *
+*                 Test Strings  for display         *
 ****************************************************/
 
 char line1[16] = {};// = ("  Newhaven Displ");
@@ -50,8 +92,9 @@ char line2[16] = {};// = ("   International");
 
 char last1[16] = {}; //store last data to only refresh screen when needed
 char last2[16] = {};
+
 /****************************************************
-*               Function Commands                   *
+*         OLED  Function Commands                   *
 ****************************************************/
 
 //-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
@@ -90,7 +133,7 @@ void command(char i)
 }
 
 //-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
-//  Start_Data_Transmission Function: 
+//  OLED Start_Data_Transmission Function: 
 //-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 //  Set CS pin LOW to begin transmission; Set RS & RW bits 
 //-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
@@ -111,7 +154,7 @@ void start_data_transmission()
 }
 
 //-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
-//  Data Function: 
+//  OLED Data Function: 
 //-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 //  Send 8-bit Transmission; Can be continuous transmission
 //-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
@@ -135,7 +178,7 @@ void data(char i)
 }
 
 //-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
-//  End_Data_Transmission Function: 
+//  OLED End_Data_Transmission Function: 
 //-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 //  Set CS pin HIGH to end transmission.
 //-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
@@ -147,7 +190,7 @@ void end_data_transmission()
 }
 
 /****************************************************
-*                  Display Functions                *
+*     OLED             Display Functions            *
 ****************************************************/
 
 void clear_screen(){         // clear display 
@@ -222,6 +265,9 @@ void ret_home(){             // Return to home position
 //  end_data_transmission();  **/  
 //}
 
+/****************************************************
+*     OLED             Screen redraw logic          *
+****************************************************/
 
 int differenceThreshold=1; //less than this amount of differing characters means we do not redraw the screen
 void printToScreen(){                 // DISPLAY TEXT
@@ -271,7 +317,7 @@ void printToScreen(){                 // DISPLAY TEXT
 }
 
 /****************************************************
-*              Initialization Routine               *
+*        OLED  Initialization Routine               *
 ****************************************************/
 
 void init1(){
@@ -291,9 +337,7 @@ void init1(){
   delay(2);
 }
 
-/*****************************************************
-*           Setup Function, to run once              *
-*****************************************************/
+
 
 byte startFrame[4]={5,0,6,5};
 
@@ -346,6 +390,13 @@ void updateScreen() {
   }
 }
 
+/*****************************************************
+*     WS2812B  LED update function                   *
+*****************************************************/
+// I enjoyed a function of a new Keithley PSU at the
+// HIVE Makerspace at Georgia Tech. It had a 
+// LED-backlit output button. When the PSU's output
+// was on, the output button was blue. 
 
 void updateLEDs() {
   leds[1]=CRGB::Red;
@@ -362,24 +413,49 @@ void updateLEDs() {
   
 }
 
+/*****************************************************
+*           Setup Function, to run once              *
+*****************************************************/
 
 void setup() {
+
+  //OLED SPI pins
   pinMode(SCL,OUTPUT);
   pinMode(SDI,OUTPUT);
   pinMode(CS,OUTPUT);
 
-  pinMode(39, INPUT_PULLUP);
+  //WS2812B LEDs
+  pinMode(LEDPIN,OUTPUT);
 
+  //Keys
+  pinMode(KEY_OPERATE, INPUT); //NO INPUT PULLUP
+  pinMode(KEY_4WSENSE, INPUT); //NO INPUT PULLUP Not a 2304A key.
+
+  pinMode(KEY_ENTER, INPUT_PULLUP);
+  pinMode(KEY_RIGHT, INPUT_PULLUP);
+  pinMode(KEY_DOWN, INPUT_PULLUP);
+  pinMode(KEY_UP, INPUT_PULLUP);
+  pinMode(KEY_LEFT, INPUT_PULLUP);
+  pinMode(KEY_SET, INPUT_PULLUP);
+  pinMode(KEY_DISPLAY, INPUT_PULLUP);
+  pinMode(KEY_POWER, INPUT_PULLUP); //Not a 2304A key.
+  pinMode(KEY_MENU, INPUT_PULLUP);
+
+  //Debug serial
   Serial.begin(9600);
-  mySerial.begin(9600,EspSoftwareSerial::SWSERIAL_8N1,16,17,false);
+
+  //RS-232 to Keithley 2304A
+  mySerial.begin(9600,EspSoftwareSerial::SWSERIAL_8N1,RS232_RX,RS232_TX,false);
   Serial.println("START");  // reserve 200 bytes for the inputString:
   inputString.reserve(200);
 
 
   FastLED.addLeds<NEOPIXEL, LEDPIN>(leds, 11);
   
+  //OLED initialization
   //DDRB = 0xFF; // Enable pins on PORT B as outputs
   init1();
+  
   //delay(100);
 
   
