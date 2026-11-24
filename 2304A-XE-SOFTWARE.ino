@@ -16,7 +16,7 @@ MIT Licensed
 /****************************************************
 *      Application state                            *
 ****************************************************/
-bool psu_enabled = false; //is PSU relay commanded on?
+bool psu_enabled = true; //is PSU relay commanded on? for testing, start in enabled
 bool psu_comms = false;   //is PSU talking to us?
 //if PSU enabled==false, the "power" light will be Red
 //if PSU enabled==true, but psu_comms is false, 
@@ -94,8 +94,12 @@ bool fourwire_sw_enabled = false;
 // buffers, serial objects, and serial stream control
 String inputString = "";         // a String to hold incoming data
 bool stringComplete = false;  // whether the string is complete
-EspSoftwareSerial::UART  mySerial (RS232_RX,RS232_TX,true);
+//EspSoftwareSerial::UART  mySerial (RS232_RX,RS232_TX,true);
+
+HardwareSerial mySerial(2); // Use UART2
+
 String inputData;
+String inputDataAll;
 
 /****************************************************
 *          WS2812B-compatible gamer LEDs!           *
@@ -351,6 +355,7 @@ void updateScreen() {
     byte lastData=0;
     while(mySerial.available() > 0) {
         byte incomingData = mySerial.read(); //read incoming data
+        byte incomingDataAll = incomingData;
 
         if(incomingData==5) {  frameIdx=0; ;} //ENQ NUL ACK NUL is the start frame, lock onto ENQ
        // if(incomingData==6) {  ;}
@@ -360,7 +365,10 @@ void updateScreen() {
 
         if (frameIdx>=3) { validFrame=true;} //matched all chars of frame start, therefore this frame is valid
 
-        if(incomingData<32) {continue;} //do not render test characters or space
+        if(incomingData<32) {
+          inputDataAll = inputDataAll + String((char)incomingDataAll);
+          continue;
+        } //do not render test characters or space
 
         if(validFrame==true) {
           if(lineCounter==0){ line1[byteCounter]=(char)incomingData;}
@@ -373,7 +381,7 @@ void updateScreen() {
           if(lineCounter>1) { break; }
   
   
-          
+          inputDataAll = inputDataAll + String((char)incomingDataAll);
           inputData = inputData + String((char)incomingData);
         }
     }
@@ -384,8 +392,17 @@ void updateScreen() {
       last_successful_rx = esp_timer_get_time(); //store current time as last successful RX
                                                  //used to detect timeout
 
+      Serial.print("SERIAL MSG ASCII: ");
       Serial.println(inputData);
       inputData="";
+
+      Serial.print("SERIAL MSG HEX: ");
+      for (int i = 0; i < strlen(inputDataAll.c_str()); i++) {
+        Serial.print(inputDataAll[i], HEX);
+        Serial.print(" "); // Optional space for readability
+      }
+      Serial.println(); // Outputs: 48 65 6C 6C 6F
+      inputDataAll="";
     
       mySerial.flush();
       printToScreen();
@@ -433,6 +450,10 @@ char codes[11] = {'E',        '?',          'A',        'F',      'J',      'K',
 //KEY-UP is the @ for some reason
 char keyup = '@';
 
+char keepalive = 0x00; //Boy, I love committing SYNs
+
+char queuedkey = keepalive;
+
 //how long has key been held? (in us)
 int64_t held[11] = {0};
 
@@ -450,6 +471,40 @@ void initKeyPolling() {
   }
 }
 
+// queues a key code for transmit to the 2304A. 
+// The system will 1
+bool queueIfPossible(char key) {
+  if (queuedkey != keepalive) {
+    return false; //a key is queued, can't overwrite em
+  } else  {
+    queuedkey = key; //we can queue
+  }
+}
+
+void handleTxQueue() {
+
+  //try TXing start frame
+  uint8_t startFrame[5]={5,0,6,5,0};
+
+ // mySerial.write(startFrame,5);
+  //mySerial.write((uint8_t)0x05);
+ // mySerial.write((uint8_t)0x00);
+ // mySerial.write((uint8_t)0x06);
+  //mySerial.write((uint8_t)0x05);
+
+  if(queuedkey!=keepalive) {
+    //mySerial.write(queuedkey);
+   // delay(50);
+   // mySerial.write(keyup);
+  }
+
+
+  queuedkey = keepalive; //reset queuedkey to the keepalive key
+                         //system will always emit at least the keepalive key
+                         //and will emit the Code or Keyup if a button is pressed
+                         //hopefully we can stop this thing from timing out
+}
+
 // for 2304A keys, this handles debounce and sends serial commands to the 2304A
 // for non-2304A keys, this changes the state of the system and doesn't send serial.
 
@@ -458,7 +513,7 @@ void pollKeysAndTriggerActions()
 {
 
   //check if each key is being pressed
-  for (size_t i = 4; i<sizeof(keys)/sizeof(keys[0]); i++) {
+  for (size_t i = 0; i<(sizeof(keys)/sizeof(keys[0])); i++) {
 
     //There is a clock time for each key since execution time of 
     //one key's entry can increase if it has to send any serial
@@ -483,24 +538,25 @@ void pollKeysAndTriggerActions()
 
     } else { //we are not in the debounce state!
       if (digitalRead(keys[i])==0) { //key is pressed
-        if(i>3) {
-          Serial.print("Key ");         Serial.print(i);
-          Serial.println(" is pressed! ");
-        }
+        
+        Serial.print("Key ");         Serial.print(i);
+        Serial.println(" is pressed! ");
+        
 
         held[i] += elapsed_time; //update held if the key is actively being pressed
 
         if ((held[i]>KEY_HOLD_TIME_TO_TRIGGER_US) && (triggeredAction[i]==0)) { //key has been held long enough to trigger action
-          if(i>3) {
-            Serial.print("Key ");         Serial.print(i);
-            Serial.println(" is triggered! ");  
-          }
+
+          Serial.print("Key ");         Serial.print(i);
+          Serial.println(" is triggered! ");  
+          
           if (codes[i] == '?' ) { //4WS pin
             fourwire_sw_enabled = !fourwire_sw_enabled; 
           } else if (codes[i] == '/' ) {//Power pin
             psu_enabled = !psu_enabled;
           } else {
             mySerial.write(codes[i]); //send the button's code to the 2304A
+            //if(!queueIfPossible(codes[i])) { continue; } //don't set triggeredAction to 1 if we didn't actually succeed in queueing the key
           }
           triggeredAction[i] = 1;     //record that we sent code, so we don't send multiple
 
@@ -509,6 +565,7 @@ void pollKeysAndTriggerActions()
         if (held[i]>KEY_HOLD_TIME_TO_TRIGGER_US) { //key has been held long enough to trigger action
           if ((codes[i] != '?' ) && (codes[i] != '/')) { //the special codes don't have a keyup action
             mySerial.write(keyup); //key was pressed long enough to send code, so it must also send keyup char
+            //if(!queueIfPossible(keyup)) { continue; } //don't reset held unless the keyup was actually queued
           } 
           held[i] = (-1)*KEY_DEBOUNCE_TIME_US; //while held is negative, button can't be pressed
                                                //implements KEY_DEBOUNCE_TIME_US debounce
@@ -689,8 +746,8 @@ void setup() {
   pinMode(KEY_OPERATE, INPUT); //NO INPUT PULLUP
   pinMode(KEY_4WSENSE, INPUT); //NO INPUT PULLUP Not a 2304A key.
 
-  pinMode(KEY_ENTER, INPUT_PULLUP);
-  pinMode(KEY_RIGHT, INPUT_PULLUP);
+  pinMode(KEY_ENTER, INPUT); //NO INPUT PULLUP
+  pinMode(KEY_RIGHT, INPUT); //NO INPUT PULLUP
   pinMode(KEY_DOWN, INPUT_PULLUP);
   pinMode(KEY_UP, INPUT_PULLUP);
   pinMode(KEY_LEFT, INPUT_PULLUP);
@@ -703,7 +760,10 @@ void setup() {
   Serial.begin(9600);
 
   //RS-232 Serial to Keithley 2304A
-  mySerial.begin(9600,EspSoftwareSerial::SWSERIAL_8N1,RS232_RX,RS232_TX,false);
+  //mySerial.begin(9600,EspSoftwareSerial::SWSERIAL_8N1,RS232_RX,RS232_TX,false);
+  mySerial.begin(9600, SERIAL_8N1, 16, 17); // RX=16, TX=17
+
+
   Serial.println("START");  // reserve 200 bytes for the inputString:
   inputString.reserve(400);
 
@@ -730,12 +790,14 @@ void loop() {
   //mySerial.write('H');
 
 
-  pollKeysAndTriggerActions();
-  updateRelayStates();
-  updateLEDs();
+  pollKeysAndTriggerActions(); //checks keys and queues serial TX to 2304A
+
+  handleTxQueue(); //actually transmits queued serial TX
+  updateRelayStates(); //power/4WS/cooling fan relays/transistors
+  updateLEDs(); //gamer LEDs, ya know, for coolness
   
-  mySerial.write('@');
-  delay(50);
+  //mySerial.write('@');
+  delay(100); //100Hz event rate(minus whatever the )
   updateScreen();
 
 
